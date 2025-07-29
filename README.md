@@ -63,6 +63,9 @@ export PATH=$PATH:$HOME/go/bin
 #### 3. You get `Error: Cannot find module 'postcss'` when running `npm run serve` 
    - The module may not have been installed for some reason so run `npm install --save-dev postcss gulp-postcss` and then rerun `npm run serve` 
 
+### 4. The site launches, but doesn't display any quickstarts
+  - This is most likely a Claat error. Run `claat` and/or `which claat` in your CLI. If you get an error, see [claat related errors](#claat-related-errors)
+
 ## Write Your First QuickStart
 
   1. Terminate the running server with `ctrl C` and navigate to the `sfguides` source directory `cd sfguides/src`
