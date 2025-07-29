@@ -1,6 +1,6 @@
 // See https://containers.dev/implementors/json_reference/ for configuration reference
 {
-	"name": "Snowflake Quickstarts Dev Container",
+    "name": "Snowflake Quickstarts Dev Container",
 	"build": {
 		"dockerfile": "Dockerfile",
 		"options": [
@@ -8,27 +8,17 @@
 		]
 	},
 	"remoteUser": "node",
-	"features": {
-		"ghcr.io/devcontainers/features/node:1": {
-			"nodeGypDependencies": true,
-			"installYarnUsingApt": true,
-			"version": "14",
-			"pnpmVersion": "latest",
-			"nvmVersion": "latest"
-		},
-		"ghcr.io/devcontainers/features/go:1": {
-			"version": "latest"
-		}
-	},
-	"postCreateCommand": "cd site && npm install -g gulp-cli && go install github.com/googlecodelabs/tools/claat@latest && npm install",
-	"portsAttributes": {
-		"8000": {
-			"label": "Quickstarts Local Server",
-			"onAutoForward": "notify"
-		}
-	},
-	"forwardPorts": [
-		8000
-	],
-	"customizations": {}
+	"features": {},
+	"postCreateCommand": "cd site && npm install",
+	"postStartCommand": "cd site && npm run serve",
+    "portsAttributes": {
+        "8000": {
+            "label": "Quickstarts Local Server",
+            "onAutoForward": "notify"
+        }
+    },
+    "forwardPorts": [8000],
+    "customizations": {
+	}
+
 }
