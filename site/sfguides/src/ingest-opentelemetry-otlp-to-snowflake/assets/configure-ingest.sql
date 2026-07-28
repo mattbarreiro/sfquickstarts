@@ -7,7 +7,7 @@
 -- ---- You MUST change the following values -----------------------------------
 -- Ingest network policy allowlist. Change to a comma-separated list of 
 -- public IPs and/or CIDR(s) that are allowed to ingest telemetry.
-SET QS_INGEST_IP_ALLOWLIST = '192.0.2.0/32'; -- <<< CHANGE THIS!
+SET QS_INGEST_IP_ALLOWLIST = '192.0.2.0'; -- <<< CHANGE THIS!
 
 -- ---- You may optionally change the following values -------------------------
 -- DB, Schema, and Event Tables

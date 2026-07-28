@@ -17,7 +17,7 @@
 author: Matt Barreiro (@mattbarreiro)
 id: ingest-opentelemetry-otlp-to-snowflake
 language: en
-summary: Use Snowflake's native OTLP endpoint to ingest OpenTelemetry data, then visualize it using Grafana.
+summary: Use Snowflake's native OTLP endpoint to ingest OpenTelemetry telemetry data
 categories: snowflake-site:taxonomy/solution-center/certification/quickstart,snowflake-site:taxonomy/product/platform,snowflake-site:taxonomy/snowflake-feature/ingestion,snowflake-site:taxonomy/snowflake-feature/observability,snowflake-site:taxonomy/snowflake-feature/data-lake
 environments: web
 status: Published
@@ -25,13 +25,11 @@ feedback link: https://github.com/Snowflake-Labs/sfguides/issues
 fork repo link: https://github.com/Snowflake-Labs/sfquickstarts/tree/master/site/sfguides/src/ingest-opentelemetry-otlp-to-snowflake
 <!-- open in snowflake: <optional but modify to link into the product e.g. https://docs.snowflake.com/en/user-guide/ui-snowsight/snowsight-templates>  and https://www.snowflake.com/en/developers/guides/getting-started-with-snowflake-intelligence/ -->
 
-# Ingest OpenTelemetry to Snowflake and Visualize with Grafana
+# Ingest OpenTelemetry (OTLP) Telemetry to Snowflake
 <!-- ------------------------ -->
 ## Overview
 
 <!-- TODO -->
-
-<!-- TODO something about how you can still do the ingest portion without grafana!!! -->
 
 <!-- TODO explain what the otel demo is (collection of microservices to) -->
 
@@ -117,13 +115,13 @@ We need to create some resources in Snowflake to support ingestion, which will l
 
 ### Add Placeholders to `.env.override`
 
-Open in the `opentelemetry-demo` repo and add the following placeholders to the end of `.env.override`:
+Open in the `opentelemetry-demo` repo and add the following placeholders to the end of `.env.override`: 
 
 ```shell
 SNOWFLAKE_ACCOUNT_URL=https://
-SNOWFLAKE_EVENT_TABLE_LOGS=
-SNOWFLAKE_EVENT_TABLE_METRICS=
-SNOWFLAKE_EVENT_TABLE_TRACES=
+SNOWFLAKE_EVENT_TABLE_LOGS=OTLP_INGEST_QS.TELEMETRY.LOGS
+SNOWFLAKE_EVENT_TABLE_METRICS=OTLP_INGEST_QS.TELEMETRY.METRICS
+SNOWFLAKE_EVENT_TABLE_TRACES=OTLP_INGEST_QS.TELEMETRY.TRACES
 SNOWFLAKE_OTLP_ENDPOINT=https://
 SNOWFLAKE_PAT=
 ```
@@ -131,11 +129,108 @@ SNOWFLAKE_PAT=
 Then add your Snowflake Account/Server URL to the end of `SNOWFLAKE_ACCOUNT_URL=https://` (e.g. `SNOWFLAKE_ACCOUNT_URL=https://myaccount-myorg.snowflakecomputing.com`) and save the file.
 
 ### Create Snowflake Resources
-<!-- TODO  -->
-Now login to Snowsight and open a new worksheet. Paste the following in:
 
-```sql <!-- TODO  -->
+<!-- TODO sentance intro / transition  -->
+
+<!-- TODO explain what we are about to do, and that we have it in one big block because of session variables -->
+
+Login to Snowsight and open a new worksheet. Paste the following in:
+
+```sql
+-- =============================================================================
+-- Variable Definitions
+-- =============================================================================
+-- ---- You MUST change the following values -----------------------------------
+-- Ingest network policy allowlist. Change to a comma-separated list of 
+-- public IPs and/or CIDR(s) that are allowed to ingest telemetry.
+SET QS_INGEST_IP_ALLOWLIST = '192.0.2.0'; -- <<< CHANGE THIS!
+
+-- ---- You may optionally change the following values -------------------------
+-- DB, Schema, and Event Tables
+SET QS_DB      = 'OTLP_INGEST_QS';
+SET QS_SCHEMA  = 'TELEMETRY';
+SET QS_ET_L    = 'LOGS';
+SET QS_ET_M    = 'METRICS';
+SET QS_ET_T    = 'TRACES';
+
+-- Security and Identity
+SET QS_INGEST_RL       = 'QS_TELEMETRY_INGEST_RL';
+SET QS_INGEST_USER     = 'QS_TELEMETRY_INGEST_USER';
+SET QS_INGEST_NP       = 'QS_TELEMETRY_INGEST_NP';      -- network policy
+SET QS_INGEST_PAT_NAME = 'TELEMETRY_INGEST_PAT_TOKEN';  -- PAT token name
+SET QS_INGEST_PAT_DAYS = 14;                            -- PAT lifetime in days; keep short and rotate
 ```
+
+In a new tab, visit [https://checkip.amazonaws.com/](https://checkip.amazonaws.com/) to get your public IP. Then update `SET QS_INGEST_IP_ALLOWLIST = ...` with your IP address. 
+
+> Note: If your account is configured to require all access via PrivateLink, use your private IP instead.
+
+Review all the other variable definitions, and update if desired. 
+
+Next paste all of the following into the same worksheet:
+
+```sql
+-- =============================================================================
+-- Object Creation DDL
+-- =============================================================================
+-- ---- 1) Create Database, Schema, and Event Tables ---------------------------
+USE ROLE SYSADMIN;
+
+CREATE DATABASE IF NOT EXISTS IDENTIFIER($QS_DB);
+USE DATABASE IDENTIFIER($QS_DB);
+
+CREATE SCHEMA IF NOT EXISTS IDENTIFIER($QS_SCHEMA);
+USE SCHEMA IDENTIFIER($QS_SCHEMA);
+
+CREATE EVENT TABLE IF NOT EXISTS IDENTIFIER($QS_ET_L)
+  COMMENT = 'Contains logs ingested via OTLP';
+CREATE EVENT TABLE IF NOT EXISTS IDENTIFIER($QS_ET_M)
+  COMMENT = 'Contains metrics ingested via OTLP';
+CREATE EVENT TABLE IF NOT EXISTS IDENTIFIER($QS_ET_T)
+  COMMENT = 'Contains traces ingested via OTLP';
+
+-- ---- 2) Create Role and Ingest Grants ---------------------------------------
+USE ROLE SECURITYADMIN;
+
+CREATE ROLE IF NOT EXISTS IDENTIFIER($QS_INGEST_RL);
+
+GRANT INGEST TELEMETRY ON EVENT TABLE IDENTIFIER($QS_ET_L)
+  TO ROLE IDENTIFIER($QS_INGEST_RL);
+GRANT INGEST TELEMETRY ON EVENT TABLE IDENTIFIER($QS_ET_M)
+  TO ROLE IDENTIFIER($QS_INGEST_RL);
+GRANT INGEST TELEMETRY ON EVENT TABLE IDENTIFIER($QS_ET_T)
+  TO ROLE IDENTIFIER($QS_INGEST_RL);
+
+-- ---- 3) Create User and Assign Role ------------------------------------------
+USE ROLE USERADMIN;
+CREATE USER IF NOT EXISTS IDENTIFIER($QS_INGEST_USER)
+  TYPE = SERVICE
+  DEFAULT_ROLE = $QS_INGEST_RL
+  COMMENT = 'Used to ingest telemetry via the OTLP public-endpoint';
+
+USE ROLE SECURITYADMIN;
+GRANT ROLE IDENTIFIER($QS_INGEST_RL) TO USER IDENTIFIER($QS_INGEST_USER);
+
+-- ---- 4) Create and Assign Network Policy ------------------------------------
+SET qs_np_ddl = (SELECT
+  'CREATE NETWORK POLICY IF NOT EXISTS ' || $QS_INGEST_NP ||
+  ' ALLOWED_IP_LIST = (''' || REPLACE($QS_INGEST_IP_ALLOWLIST, ',', ''',''') || ''')');
+EXECUTE IMMEDIATE $qs_np_ddl;
+
+ALTER USER IDENTIFIER($QS_INGEST_USER) SET NETWORK_POLICY = $QS_INGEST_NP;
+
+-- ---- 5) Create and Assign PAT ------------------------------------------------
+SET qs_pat_ddl =
+  'ALTER USER ' || $QS_INGEST_USER ||
+  ' ADD PROGRAMMATIC ACCESS TOKEN ' || $QS_INGEST_PAT_NAME ||
+  ' DAYS_TO_EXPIRY = ' || $QS_INGEST_PAT_DAYS ||
+  ' ROLE_RESTRICTION = ' || $QS_INGEST_RL;
+EXECUTE IMMEDIATE $qs_pat_ddl;
+```
+
+Then select and run all of the pasted code. This will set the session variables and then create all the required resources.
+
+The last SQL command will display the PAT for the newly created user. Copy this and paste as the value for `SNOWFLAKE_PAT` in `.env.override`. Also, if you modified the default values for any of `QS_DB`, `QS_SCHEMA`, `QS_ET_L`, `QS_ET_M, or `QS_ET_T`, you also need to update `SNOWFLAKE_EVENT_TABLE_[LOGS|METRICS|TRACES]`.env.override` to match.
 
 ### Retrieve the Telemetry Endpoint URL
 
@@ -220,14 +315,20 @@ Then run
 <!-- TODO -->
 
 <!-- ------------------------ -->
-<!-- ------------------------ -->
- 
+## Cleaning Up
+<!-- TODO -->
+
 <!-- ------------------------ -->
 ## Conclusion And Resources
+
+
+
+<!-- TODO
 
 At the end of your Snowflake Guide, always have a clear call to action (CTA). This CTA could be a link to the docs pages, links to videos on youtube, a GitHub repo link, etc. 
 
 If you want to learn more about Snowflake Guide formatting, checkout the official documentation here: [Snowflake Guide](#)
+ -->
 
 ### What You Learned
 
