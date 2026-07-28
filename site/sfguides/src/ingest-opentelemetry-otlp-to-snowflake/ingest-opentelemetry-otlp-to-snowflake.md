@@ -29,30 +29,25 @@ fork repo link: https://github.com/Snowflake-Labs/sfquickstarts/tree/master/site
 <!-- ------------------------ -->
 ## Overview
 
-<!-- TODO -->
-
-<!-- TODO explain what the otel demo is (collection of microservices to) -->
-
-OpenTelemetry is
-Utilizes the OpenTelemetry Demo to generate telem
-
-
+OpenTelemetry is the industry-standard, vendor-neutral framework for instrumenting applications to produce telemetry data — logs, metrics, and traces — and shipping it to an observability backend using the OpenTelemetry Protocol (OTLP). In this guide, you'll stand up the [OpenTelemetry Demo](https://opentelemetry.io/ecosystem/demo/), a realistic e-commerce application fully instrumented with OpenTelemetry, and configure its OpenTelemetry Collector to export logs, metrics, and traces directly to Snowflake using Snowflake's native OTLP ingest endpoint — no external pipeline or ETL required.
 
 ### Prerequisites
 
-- Familiarity with .... <!-- TODO  i think this is more about "what you should know/understand" vs "what you need" -->
-- 
-- Familiarity with the basic concepts of Observability such as logs, metrics, and traces.
-- (Helpful) Familiarity with OpenTelemetry
+- Familiarity with:
+  - Running Docker containers and using the command line
+  - Basic Snowflake objects (databases, schemas, roles) and running SQL in Snowsight
+  - The basic concepts of Observability such as logs, metrics, and traces
+  - (Helpful) OpenTelemetry
 
 ### What You’ll Learn
 
-- <!-- TODO -->
-- 
+- How to configure Snowflake to natively receive OpenTelemetry (OTLP) data via a managed public endpoint
+- How to configure an OpenTelemetry Collector to export logs, metrics, and traces to Snowflake Event Tables
+- How to query OpenTelemetry logs, metrics, and traces stored in Snowflake using SQL
 
 ### What You’ll Need
 
-- A Snowflake account with _____ permissions <!-- TODO  test with USE SECONDARY ROLES NONE -->
+- A Snowflake account with a role that can act as `SYSADMIN`, `SECURITYADMIN`, and `USERADMIN` (for example, `ACCOUNTADMIN`), used to create the database, event tables, role, service user, network policy, and PAT
 - A computer with:
   - Git
   - Docker
@@ -63,21 +58,24 @@ Utilizes the OpenTelemetry Demo to generate telem
 
 ### What You’ll Build
 
-- <!-- TODO -->
+- A set of Snowflake Event Tables that store OpenTelemetry logs, metrics, and traces ingested directly via OTLP
+- A dedicated, network-restricted service user and role used only for telemetry ingestion
+- A running instance of the OpenTelemetry Demo shop application, streaming its telemetry straight to Snowflake
 
 
 <!-- ------------------------ -->
 ## Background
 
-OpenTelemetry (OTEL) is .... <!-- TODO -->
-The OpenTelemetry Protocol (OTLP) is .... <!-- TODO -->
+[OpenTelemetry](https://opentelemetry.io/) (OTel) is an open-source, vendor-neutral framework and set of standards, backed by the Cloud Native Computing Foundation (CNCF), for instrumenting, generating, collecting, and exporting telemetry data — logs, metrics, and traces — from applications and infrastructure. It has become the industry standard for observability instrumentation.
 
-The [OpenTelemetry Demo](https://opentelemetry.io/ecosystem/demo/) is a "microservice-based distributed system intended to illustrate the implementation of OpenTelemetry in a near real-world environment". <!-- TODO paraphrase--> 
-This make it a great source of realistic telemetry data, as well as a great tool for learning more about the OpenTelemetry ecosystem.
+The [OpenTelemetry Protocol (OTLP)](https://opentelemetry.io/docs/specs/otlp/) is the wire protocol OpenTelemetry uses to transmit telemetry data between components — for example, from an application's SDK to an [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/), and from a Collector to one or more observability backends.
+
+The [OpenTelemetry Demo](https://opentelemetry.io/ecosystem/demo/) is a mock e-commerce application, implemented as microservices and fully instrumented with OpenTelemetry, designed to illustrate realistic, production-like telemetry across a distributed system.
+This makes it a great source of realistic telemetry data, as well as a great tool for learning more about the OpenTelemetry ecosystem.
 
 In the past, storing OpenTelemetry data on Snowflake typically meant emitting data as OTLP/JSON, pushing that JSON to a streaming service such as Kafka, ingesting that JSON to Snowflake as a `VARIANT`, and running transformations to flatten it into a tabular structure. This was complicated by OpenTelemetry's data model containing multiple tiers of nested data, with context needing to be preserved at all levels.
 
-Snowflake now provides a managed OTLP endpoint to make ingesting OpenTelemetry data as simple as pointing your OpenTelemetry Collector directly at Snowflakes's endpoint.
+Snowflake now provides a managed OTLP endpoint to make ingesting OpenTelemetry data as simple as pointing your OpenTelemetry Collector directly at Snowflake's endpoint.
 
 > You may already be familiar with OpenTelemetry from [Snowflake Trail](https://www.snowflake.com/en/product/features/snowflake-trail/). Snowflake also collects telemetry data emitted from the Snowflake platform itself and your apps/workloads running on Snowflake. All this data is emitted in OpenTelemetry format and stored in the Event Table(s) configured for your Snowflake Account. For more info, see [Getting Started with Snowflake Trail for Observability](https://www.snowflake.com/en/developers/guides/getting-started-with-snowflake-trail-for-observability/).
 
@@ -115,7 +113,7 @@ We need to create some resources in Snowflake to support ingestion, which will l
 
 ### Add Placeholders to `.env.override`
 
-Open in the `opentelemetry-demo` repo and add the following placeholders to the end of `.env.override`: 
+In the `opentelemetry-demo` repo, open `.env.override` and add the following placeholders to the end of the file: 
 
 ```shell
 SNOWFLAKE_ACCOUNT_URL=https://
@@ -130,9 +128,9 @@ Then add your Snowflake Account/Server URL to the end of `SNOWFLAKE_ACCOUNT_URL=
 
 ### Create Snowflake Resources
 
-<!-- TODO sentance intro / transition  -->
+Next, create the Snowflake objects needed to receive telemetry: a database and schema to hold the Event Tables, one Event Table per signal type (logs, metrics, traces), a dedicated role and service user for ingestion, a network policy restricting access to that user, and a PAT the OpenTelemetry Collector will use to authenticate.
 
-<!-- TODO explain what we are about to do, and that we have it in one big block because of session variables -->
+The DDL below is split into a block of session variables followed by a block of object-creation statements that reference those variables with `IDENTIFIER($...)`. Setting names and the network allowlist as variables up front lets you customize them in one place, then run the rest of the DDL as-is.
 
 Login to Snowsight and open a new worksheet. Paste the following in:
 
@@ -230,7 +228,7 @@ EXECUTE IMMEDIATE $qs_pat_ddl;
 
 Then select and run all of the pasted code. This will set the session variables and then create all the required resources.
 
-The last SQL command will display the PAT for the newly created user. Copy this and paste as the value for `SNOWFLAKE_PAT` in `.env.override`. Also, if you modified the default values for any of `QS_DB`, `QS_SCHEMA`, `QS_ET_L`, `QS_ET_M, or `QS_ET_T`, you also need to update `SNOWFLAKE_EVENT_TABLE_[LOGS|METRICS|TRACES]`.env.override` to match.
+The last SQL command will display the PAT for the newly created user. Copy the `token_secret` value and paste it as the value for `SNOWFLAKE_PAT` in `.env.override`. Also, if you modified the default values for any of `QS_DB`, `QS_SCHEMA`, `QS_ET_L`, `QS_ET_M`, or `QS_ET_T`, update `SNOWFLAKE_EVENT_TABLE_LOGS`, `SNOWFLAKE_EVENT_TABLE_METRICS`, and `SNOWFLAKE_EVENT_TABLE_TRACES` in `.env.override` to match.
 
 ### Retrieve the Telemetry Endpoint URL
 
@@ -293,54 +291,127 @@ service:
 
 ```
 
-You can now bring the application up again with either:
+You can now bring the application up again with:
 
 ```shell
 docker compose up -d
 ```
 
-for minimal mode, or
+Give the demo application a few moments to start up, then generate some traffic by clicking around the [Web store](http://localhost:8080/) — browse products, add items to your cart, and check out. This traffic generates logs, metrics, and traces that flow through the Collector to Snowflake.
+
+To confirm telemetry is being exported successfully, check the Collector's logs for errors:
 
 ```shell
+docker compose logs otel-collector
+```
+
+
+### Optional: Full Mode
+
+If you have ~6GB or more of free RAM, you can also run the application in "full" mode. This adds Kafka, additional services that depend on Kafka, and patches other core services for Kafka-awareness. This is not required, but does <!-- TODO -->
+
+```shell
+docker compose down --remove-orphans
 docker compose -f compose.yaml -f compose.full.yaml up -d
 ```
 
-for full mode (depending on how much RAM you have.)
-
-Then run 
-
-
 <!-- ------------------------ -->
 ## Query Telemetry Data
-<!-- TODO -->
+
+With telemetry flowing into your Event Tables, you can query logs, metrics, and traces directly with SQL. Run the following in a Snowsight worksheet:
+
+```sql
+USE DATABASE OTLP_INGEST_QS;   -- or the value you set for QS_DB
+USE SCHEMA TELEMETRY;          -- or the value you set for QS_SCHEMA
+
+-- Most recent trace spans, by service
+SELECT
+  TIMESTAMP,
+  RESOURCE_ATTRIBUTES:"service.name"::STRING AS SERVICE_NAME,
+  RECORD:"name"::STRING AS SPAN_NAME,
+  RECORD_TYPE
+FROM TRACES
+ORDER BY TIMESTAMP DESC
+LIMIT 25;
+
+-- Most recent log messages, by service
+SELECT
+  TIMESTAMP,
+  RESOURCE_ATTRIBUTES:"service.name"::STRING AS SERVICE_NAME,
+  RECORD:"severity_text"::STRING AS SEVERITY,
+  VALUE AS LOG_MESSAGE
+FROM LOGS
+ORDER BY TIMESTAMP DESC
+LIMIT 25;
+
+-- Most recent metric data points, by service
+SELECT
+  TIMESTAMP,
+  RESOURCE_ATTRIBUTES:"service.name"::STRING AS SERVICE_NAME,
+  RECORD:"metric":"name"::STRING AS METRIC_NAME,
+  VALUE
+FROM METRICS
+ORDER BY TIMESTAMP DESC
+LIMIT 25;
+```
+
+> If these queries return no rows, give the pipeline another minute and re-run — the Collector batches exports on an interval — or check `docker compose logs otel-collector` for delivery errors.
+
+Each row's `RESOURCE_ATTRIBUTES`, `RECORD`, and `RECORD_ATTRIBUTES` columns are semi-structured `OBJECT`/`VARIANT` data, so you can use standard Snowflake [JSON path notation](https://docs.snowflake.com/en/user-guide/querying-semistructured) to pull out any attribute emitted by the OpenTelemetry SDKs. For the full column reference, see [Event table columns](https://docs.snowflake.com/en/developer-guide/logging-tracing/event-table-columns).
 
 <!-- ------------------------ -->
 ## Cleaning Up
-<!-- TODO -->
+
+When you're done, stop the OpenTelemetry Demo and remove its containers, network, and volumes:
+
+```shell
+docker compose down --remove-orphans -v
+```
+
+Next, clean up the Snowflake resources created earlier. Return to your Snowsight worksheet, **re-run the *Variable Definitions* block from earlier** (so the session variables are set again for this session), then run the following to remove all resources:
+
+```sql
+-- ---- 1) Remove PAT and drop the service user ---------------------------------
+USE ROLE SECURITYADMIN;
+SET qs_drop_pat_ddl =
+  'ALTER USER ' || $QS_INGEST_USER ||
+  ' REMOVE PROGRAMMATIC ACCESS TOKEN ' || $QS_INGEST_PAT_NAME;
+EXECUTE IMMEDIATE $qs_drop_pat_ddl;
+
+USE ROLE USERADMIN;
+DROP USER IF EXISTS IDENTIFIER($QS_INGEST_USER);
+
+-- ---- 2) Drop Network Policy and Role ------------------------------------------
+USE ROLE SECURITYADMIN;
+SET qs_drop_np_ddl = 'DROP NETWORK POLICY IF EXISTS ' || $QS_INGEST_NP;
+EXECUTE IMMEDIATE $qs_drop_np_ddl;
+
+DROP ROLE IF EXISTS IDENTIFIER($QS_INGEST_RL);
+
+-- ---- 3) Drop Database (cascades to the schema and event tables) --------------
+USE ROLE SYSADMIN;
+DROP DATABASE IF EXISTS IDENTIFIER($QS_DB);
+```
+
+> Dropping the user first removes the network policy *assignment*, and dropping the role removes the `INGEST TELEMETRY` grants — so the policy and role can be dropped directly without first revoking anything. Likewise, `DROP DATABASE` removes the schema and all three event tables in one step.
 
 <!-- ------------------------ -->
 ## Conclusion And Resources
 
-
-
-<!-- TODO
-
-At the end of your Snowflake Guide, always have a clear call to action (CTA). This CTA could be a link to the docs pages, links to videos on youtube, a GitHub repo link, etc. 
-
-If you want to learn more about Snowflake Guide formatting, checkout the official documentation here: [Snowflake Guide](#)
- -->
+Congratulations! You've configured Snowflake to natively ingest OpenTelemetry logs, metrics, and traces via OTLP — no Kafka, no external pipeline, and no manual flattening of nested JSON required. From here, you can point any OpenTelemetry Collector at your Snowflake account and start querying your own applications' telemetry with SQL.
 
 ### What You Learned
 
-<!-- TODO 
-- Basics of creating sections
-- adding formatting and code snippets
-- Adding images and videos with considerations to keep in mind
--->
+- How OpenTelemetry, OTLP, and the OpenTelemetry Demo fit together
+- How to create Snowflake Event Tables dedicated to OTLP-ingested logs, metrics, and traces
+- How to create a network-restricted service user and role, and issue a PAT scoped for telemetry ingestion only
+- How to configure an OpenTelemetry Collector exporter to send data directly to Snowflake's managed OTLP endpoint
+- How to query OpenTelemetry data stored in Event Tables using standard SQL and semi-structured data functions
 
 ### Related Resources
 
-<!-- TODO 
-- <link to github code repo>
-- <link to related documentation>
--->
+- [OpenTelemetry Demo documentation](https://opentelemetry.io/docs/demo/)
+- [Event table columns](https://docs.snowflake.com/en/developer-guide/logging-tracing/event-table-columns)
+- [Working with event tables](https://docs.snowflake.com/en/developer-guide/logging-tracing/event-table-setting-up)
+- [Using programmatic access tokens for authentication](https://docs.snowflake.com/en/user-guide/programmatic-access-tokens)
+- [Getting Started with Snowflake Trail for Observability](https://www.snowflake.com/en/developers/guides/getting-started-with-snowflake-trail-for-observability/)
