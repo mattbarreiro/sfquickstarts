@@ -88,41 +88,17 @@ EXECUTE IMMEDIATE $qs_pat_ddl;
 -- Cleanup DDL  (re-run the Variable Definitions block first if in a new session)
 -- =============================================================================
 
--- -- ---- 1) Remove PAT -----------------------------------------------------------
--- USE ROLE SECURITYADMIN;
--- SET qs_drop_pat_ddl =
---   'ALTER USER ' || $QS_INGEST_USER ||
---   ' REMOVE PROGRAMMATIC ACCESS TOKEN ' || $QS_INGEST_PAT_NAME;
--- EXECUTE IMMEDIATE $qs_drop_pat_ddl;
-
--- -- ---- 2) Remove and drop Network Policy ---------------------------------------
--- ALTER USER IDENTIFIER($QS_INGEST_USER) UNSET NETWORK_POLICY;
--- SET qs_drop_np_ddl = 'DROP NETWORK POLICY IF EXISTS ' || $QS_INGEST_NP;
--- EXECUTE IMMEDIATE $qs_drop_np_ddl;
-
--- -- ---- 3) Revoke Role from User and drop User ----------------------------------
--- REVOKE ROLE IDENTIFIER($QS_INGEST_RL) FROM USER IDENTIFIER($QS_INGEST_USER);
+-- -- ---- 1) Drop the service user (also removes its PAT) ----------------------
 -- USE ROLE USERADMIN;
 -- DROP USER IF EXISTS IDENTIFIER($QS_INGEST_USER);
 
--- -- ---- 4) Revoke Ingest Grants and drop Role -----------------------------------
+-- -- ---- 2) Drop Network Policy and Role ---------------------------------------
 -- USE ROLE SECURITYADMIN;
--- USE DATABASE IDENTIFIER($QS_DB);
--- USE SCHEMA IDENTIFIER($QS_SCHEMA);
--- REVOKE INGEST TELEMETRY ON EVENT TABLE IDENTIFIER($QS_ET_L)
---   FROM ROLE IDENTIFIER($QS_INGEST_RL);
--- REVOKE INGEST TELEMETRY ON EVENT TABLE IDENTIFIER($QS_ET_M)
---   FROM ROLE IDENTIFIER($QS_INGEST_RL);
--- REVOKE INGEST TELEMETRY ON EVENT TABLE IDENTIFIER($QS_ET_T)
---   FROM ROLE IDENTIFIER($QS_INGEST_RL);
+-- SET qs_drop_np_ddl = 'DROP NETWORK POLICY IF EXISTS ' || $QS_INGEST_NP;
+-- EXECUTE IMMEDIATE $qs_drop_np_ddl;
+
 -- DROP ROLE IF EXISTS IDENTIFIER($QS_INGEST_RL);
 
--- -- ---- 5) Drop Event Tables, Schema, and Database ------------------------------
+-- -- ---- 3) Drop Database (cascades to the schema and event tables) ------------
 -- USE ROLE SYSADMIN;
--- USE DATABASE IDENTIFIER($QS_DB);
--- USE SCHEMA IDENTIFIER($QS_SCHEMA);
--- DROP EVENT TABLE IF EXISTS IDENTIFIER($QS_ET_L);
--- DROP EVENT TABLE IF EXISTS IDENTIFIER($QS_ET_M);
--- DROP EVENT TABLE IF EXISTS IDENTIFIER($QS_ET_T);
--- DROP SCHEMA IF EXISTS IDENTIFIER($QS_SCHEMA);
 -- DROP DATABASE IF EXISTS IDENTIFIER($QS_DB);

@@ -371,13 +371,7 @@ docker compose down --remove-orphans -v
 Next, clean up the Snowflake resources created earlier. Return to your Snowsight worksheet, **re-run the *Variable Definitions* block from earlier** (so the session variables are set again for this session), then run the following to remove all resources:
 
 ```sql
--- ---- 1) Remove PAT and drop the service user ---------------------------------
-USE ROLE SECURITYADMIN;
-SET qs_drop_pat_ddl =
-  'ALTER USER ' || $QS_INGEST_USER ||
-  ' REMOVE PROGRAMMATIC ACCESS TOKEN ' || $QS_INGEST_PAT_NAME;
-EXECUTE IMMEDIATE $qs_drop_pat_ddl;
-
+-- ---- 1) Drop the service user (also removes its PAT) -------------------------
 USE ROLE USERADMIN;
 DROP USER IF EXISTS IDENTIFIER($QS_INGEST_USER);
 
@@ -392,8 +386,6 @@ DROP ROLE IF EXISTS IDENTIFIER($QS_INGEST_RL);
 USE ROLE SYSADMIN;
 DROP DATABASE IF EXISTS IDENTIFIER($QS_DB);
 ```
-
-> Dropping the user first removes the network policy *assignment*, and dropping the role removes the `INGEST TELEMETRY` grants — so the policy and role can be dropped directly without first revoking anything. Likewise, `DROP DATABASE` removes the schema and all three event tables in one step.
 
 <!-- ------------------------ -->
 ## Conclusion And Resources
@@ -412,6 +404,5 @@ Congratulations! You've configured Snowflake to natively ingest OpenTelemetry lo
 
 - [OpenTelemetry Demo documentation](https://opentelemetry.io/docs/demo/)
 - [Event table columns](https://docs.snowflake.com/en/developer-guide/logging-tracing/event-table-columns)
-- [Working with event tables](https://docs.snowflake.com/en/developer-guide/logging-tracing/event-table-setting-up)
 - [Using programmatic access tokens for authentication](https://docs.snowflake.com/en/user-guide/programmatic-access-tokens)
 - [Getting Started with Snowflake Trail for Observability](https://www.snowflake.com/en/developers/guides/getting-started-with-snowflake-trail-for-observability/)
