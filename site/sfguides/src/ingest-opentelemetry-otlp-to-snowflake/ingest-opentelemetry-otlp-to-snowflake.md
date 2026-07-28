@@ -62,7 +62,6 @@ OpenTelemetry is the industry-standard, vendor-neutral framework for instrumenti
 - A dedicated, network-restricted service user and role used only for telemetry ingestion
 - A running instance of the OpenTelemetry Demo shop application, streaming its telemetry straight to Snowflake
 
-
 <!-- ------------------------ -->
 ## Background
 
@@ -96,7 +95,7 @@ Now start the Shop demo:
 docker compose up -d
 ```
 
-Now navigate to [http://localhost:8080/](http://localhost:8080/) and you should now see the Shop demo application! 
+Now navigate to [http://localhost:8080/](http://localhost:8080/) and you should now see the Shop demo application!
 
 Once you've confirmed that the website comes up and you can click through a few pages, run the following to stop the demo application for now:
 
@@ -113,7 +112,7 @@ We need to create some resources in Snowflake to support ingestion, which will l
 
 ### Add Placeholders to `.env.override`
 
-In the `opentelemetry-demo` repo, open `.env.override` and add the following placeholders to the end of the file: 
+In the `opentelemetry-demo` repo, open `.env.override` and add the following placeholders to the end of the file:
 
 ```shell
 SNOWFLAKE_ACCOUNT_URL=https://
@@ -130,105 +129,86 @@ Then add your Snowflake Account/Server URL to the end of `SNOWFLAKE_ACCOUNT_URL=
 
 Next, create the Snowflake objects needed to receive telemetry: a database and schema to hold the Event Tables, one Event Table per signal type (logs, metrics, traces), a dedicated role and service user for ingestion, a network policy restricting access to that user, and a PAT the OpenTelemetry Collector will use to authenticate.
 
-The DDL below is split into a block of session variables followed by a block of object-creation statements that reference those variables with `IDENTIFIER($...)`. Setting names and the network allowlist as variables up front lets you customize them in one place, then run the rest of the DDL as-is.
+Login to Snowsight, open a new worksheet, and run each of the following steps in order.
 
-Login to Snowsight and open a new worksheet. Paste the following in:
-
-```sql
--- =============================================================================
--- Variable Definitions
--- =============================================================================
--- ---- You MUST change the following values -----------------------------------
--- Ingest network policy allowlist. Change to a comma-separated list of 
--- public IPs and/or CIDR(s) that are allowed to ingest telemetry.
-SET QS_INGEST_IP_ALLOWLIST = '192.0.2.0'; -- <<< CHANGE THIS!
-
--- ---- You may optionally change the following values -------------------------
--- DB, Schema, and Event Tables
-SET QS_DB      = 'OTLP_INGEST_QS';
-SET QS_SCHEMA  = 'TELEMETRY';
-SET QS_ET_L    = 'LOGS';
-SET QS_ET_M    = 'METRICS';
-SET QS_ET_T    = 'TRACES';
-
--- Security and Identity
-SET QS_INGEST_RL       = 'QS_TELEMETRY_INGEST_RL';
-SET QS_INGEST_USER     = 'QS_TELEMETRY_INGEST_USER';
-SET QS_INGEST_NP       = 'QS_TELEMETRY_INGEST_NP';      -- network policy
-SET QS_INGEST_PAT_NAME = 'TELEMETRY_INGEST_PAT_TOKEN';  -- PAT token name
-SET QS_INGEST_PAT_DAYS = 14;                            -- PAT lifetime in days; keep short and rotate
-```
-
-In a new tab, visit [https://checkip.amazonaws.com/](https://checkip.amazonaws.com/) to get your public IP. Then update `SET QS_INGEST_IP_ALLOWLIST = ...` with your IP address. 
-
-> Note: If your account is configured to require all access via PrivateLink, use your private IP instead.
-
-Review all the other variable definitions, and update if desired. 
-
-Next paste all of the following into the same worksheet:
+#### 1. Create the Database, Schema, and Event Tables
 
 ```sql
--- =============================================================================
--- Object Creation DDL
--- =============================================================================
--- ---- 1) Create Database, Schema, and Event Tables ---------------------------
 USE ROLE SYSADMIN;
 
-CREATE DATABASE IF NOT EXISTS IDENTIFIER($QS_DB);
-USE DATABASE IDENTIFIER($QS_DB);
+CREATE DATABASE IF NOT EXISTS OTLP_INGEST_QS;
+USE DATABASE OTLP_INGEST_QS;
 
-CREATE SCHEMA IF NOT EXISTS IDENTIFIER($QS_SCHEMA);
-USE SCHEMA IDENTIFIER($QS_SCHEMA);
+CREATE SCHEMA IF NOT EXISTS TELEMETRY;
+USE SCHEMA TELEMETRY;
 
-CREATE EVENT TABLE IF NOT EXISTS IDENTIFIER($QS_ET_L)
+CREATE EVENT TABLE IF NOT EXISTS LOGS
   COMMENT = 'Contains logs ingested via OTLP';
-CREATE EVENT TABLE IF NOT EXISTS IDENTIFIER($QS_ET_M)
+CREATE EVENT TABLE IF NOT EXISTS METRICS
   COMMENT = 'Contains metrics ingested via OTLP';
-CREATE EVENT TABLE IF NOT EXISTS IDENTIFIER($QS_ET_T)
+CREATE EVENT TABLE IF NOT EXISTS TRACES
   COMMENT = 'Contains traces ingested via OTLP';
+```
 
--- ---- 2) Create Role and Ingest Grants ---------------------------------------
+> Feel free to rename `OTLP_INGEST_QS`, `TELEMETRY`, `LOGS`, `METRICS`, or `TRACES` — just use the same names in the remaining steps below and in `.env.override` later.
+
+#### 2. Create a Role and Grant Ingest Privileges
+
+Create a role dedicated to telemetry ingestion, then grant it the `INGEST TELEMETRY` privilege on each Event Table:
+
+```sql
 USE ROLE SECURITYADMIN;
 
-CREATE ROLE IF NOT EXISTS IDENTIFIER($QS_INGEST_RL);
+CREATE ROLE IF NOT EXISTS QS_TELEMETRY_INGEST_RL;
 
-GRANT INGEST TELEMETRY ON EVENT TABLE IDENTIFIER($QS_ET_L)
-  TO ROLE IDENTIFIER($QS_INGEST_RL);
-GRANT INGEST TELEMETRY ON EVENT TABLE IDENTIFIER($QS_ET_M)
-  TO ROLE IDENTIFIER($QS_INGEST_RL);
-GRANT INGEST TELEMETRY ON EVENT TABLE IDENTIFIER($QS_ET_T)
-  TO ROLE IDENTIFIER($QS_INGEST_RL);
+GRANT INGEST TELEMETRY ON EVENT TABLE OTLP_INGEST_QS.TELEMETRY.LOGS
+  TO ROLE QS_TELEMETRY_INGEST_RL;
+GRANT INGEST TELEMETRY ON EVENT TABLE OTLP_INGEST_QS.TELEMETRY.METRICS
+  TO ROLE QS_TELEMETRY_INGEST_RL;
+GRANT INGEST TELEMETRY ON EVENT TABLE OTLP_INGEST_QS.TELEMETRY.TRACES
+  TO ROLE QS_TELEMETRY_INGEST_RL;
+```
 
--- ---- 3) Create User and Assign Role ------------------------------------------
+#### 3. Create a Service User and Assign the Role
+
+```sql
 USE ROLE USERADMIN;
-CREATE USER IF NOT EXISTS IDENTIFIER($QS_INGEST_USER)
+CREATE USER IF NOT EXISTS QS_TELEMETRY_INGEST_USER
   TYPE = SERVICE
-  DEFAULT_ROLE = $QS_INGEST_RL
+  DEFAULT_ROLE = QS_TELEMETRY_INGEST_RL
   COMMENT = 'Used to ingest telemetry via the OTLP public-endpoint';
 
 USE ROLE SECURITYADMIN;
-GRANT ROLE IDENTIFIER($QS_INGEST_RL) TO USER IDENTIFIER($QS_INGEST_USER);
-
--- ---- 4) Create and Assign Network Policy ------------------------------------
-SET qs_np_ddl = (SELECT
-  'CREATE NETWORK POLICY IF NOT EXISTS ' || $QS_INGEST_NP ||
-  ' ALLOWED_IP_LIST = (''' || REPLACE($QS_INGEST_IP_ALLOWLIST, ',', ''',''') || ''')');
-EXECUTE IMMEDIATE $qs_np_ddl;
-
-ALTER USER IDENTIFIER($QS_INGEST_USER) SET NETWORK_POLICY = $QS_INGEST_NP;
-
--- ---- 5) Create and Assign PAT ------------------------------------------------
-SET qs_pat_ddl =
-  'ALTER USER ' || $QS_INGEST_USER ||
-  ' ADD PROGRAMMATIC ACCESS TOKEN ' || $QS_INGEST_PAT_NAME ||
-  ' DAYS_TO_EXPIRY = ' || $QS_INGEST_PAT_DAYS ||
-  ' ROLE_RESTRICTION = ' || $QS_INGEST_RL;
-EXECUTE IMMEDIATE $qs_pat_ddl;
+GRANT ROLE QS_TELEMETRY_INGEST_RL TO USER QS_TELEMETRY_INGEST_USER;
 ```
 
-Then select and run all of the pasted code. This will set the session variables and then create all the required resources.
+#### 4. Create and Assign a Network Policy
 
-The last SQL command will display the PAT for the newly created user. Copy the `token_secret` value and paste it as the value for `SNOWFLAKE_PAT` in `.env.override`. Also, if you modified the default values for any of `QS_DB`, `QS_SCHEMA`, `QS_ET_L`, `QS_ET_M`, or `QS_ET_T`, update `SNOWFLAKE_EVENT_TABLE_LOGS`, `SNOWFLAKE_EVENT_TABLE_METRICS`, and `SNOWFLAKE_EVENT_TABLE_TRACES` in `.env.override` to match.
+Service users must be subject to a network policy to authenticate. In a new tab, visit [https://checkip.amazonaws.com/](https://checkip.amazonaws.com/) to get your public IP, then replace `192.0.2.0` below with that IP before running:
+
+```sql
+CREATE NETWORK POLICY IF NOT EXISTS QS_TELEMETRY_INGEST_NP
+  ALLOWED_IP_LIST = ('192.0.2.0'); -- <<< CHANGE THIS!
+
+ALTER USER QS_TELEMETRY_INGEST_USER SET NETWORK_POLICY = QS_TELEMETRY_INGEST_NP;
+```
+
+> **Note:** To allow more than one address, comma-separate them inside the parentheses, e.g. `ALLOWED_IP_LIST = ('192.0.2.0', '192.168.0.0/24')`. And if your account is configured to require all access via PrivateLink, use your private IP instead.
+
+#### 5. Create a Programmatic Access Token (PAT)
+
+Finally, issue a PAT for the service user, restricted to the ingest role:
+
+```sql
+ALTER USER QS_TELEMETRY_INGEST_USER
+  ADD PROGRAMMATIC ACCESS TOKEN TELEMETRY_INGEST_PAT_TOKEN
+  DAYS_TO_EXPIRY = 14
+  ROLE_RESTRICTION = QS_TELEMETRY_INGEST_RL;
+```
+
+This command's output includes a `token_secret` column. Copy that value and paste it as the value for `SNOWFLAKE_PAT` in `.env.override`.
+
+> If you renamed anything in Step 1, remember to update `SNOWFLAKE_EVENT_TABLE_LOGS`, `SNOWFLAKE_EVENT_TABLE_METRICS`, and `SNOWFLAKE_EVENT_TABLE_TRACES` in `.env.override` to match.
 
 ### Retrieve the Telemetry Endpoint URL
 
@@ -257,23 +237,39 @@ If you haven't already, stop the existing Compose stack:
 docker compose down --remove-orphans
 ```
 
-In the `opentelemetry-demo` repo, add the following to the end of `src/otel-collector/otelcol-config-extras.yml`:
+In the `opentelemetry-demo` repo, add the following to the end of `compose.extras.yaml`:
 
 ```yaml
+# compose.extras.yaml
+services:
+  # Patch otel-collector to add the environment variables needed for Snowflake.
+  otel-collector:
+    environment:
+      - SNOWFLAKE_OTLP_ENDPOINT
+      - SNOWFLAKE_EVENT_TABLE_TRACES
+      - SNOWFLAKE_EVENT_TABLE_METRICS
+      - SNOWFLAKE_EVENT_TABLE_LOGS
+      - SNOWFLAKE_PAT
+```
+
+Also in the `opentelemetry-demo` repo, add the following to the end of `src/otel-collector/otelcol-config-extras.yml`:
+
+```yaml
+# src/otel-collector/otelcol-config-extras.yml
 exporters:
-  otlphttp/snowflake_traces:
+  otlp_http/snowflake_traces:
     endpoint: ${env:SNOWFLAKE_OTLP_ENDPOINT}
     encoding: json
     headers:
       event-table: ${env:SNOWFLAKE_EVENT_TABLE_TRACES}
       Authorization: "Bearer ${env:SNOWFLAKE_PAT}"
-  otlphttp/snowflake_metrics:
+  otlp_http/snowflake_metrics:
     endpoint: ${env:SNOWFLAKE_OTLP_ENDPOINT}
     encoding: json
     headers:
       event-table: ${env:SNOWFLAKE_EVENT_TABLE_METRICS}
       Authorization: "Bearer ${env:SNOWFLAKE_PAT}"
-  otlphttp/snowflake_logs:
+  otlp_http/snowflake_logs:
     endpoint: ${env:SNOWFLAKE_OTLP_ENDPOINT}
     encoding: json    # Snowflake expects OTLP JSON format
     headers:
@@ -283,18 +279,18 @@ exporters:
 service:
   pipelines:
     traces:
-      exporters: [debug, span_metrics, otlphttp/snowflake_traces]
+      exporters: [span_metrics, otlp_http/snowflake_traces]
     metrics:
-      exporters: [debug, otlphttp/snowflake_metrics]
+      exporters: [otlp_http/snowflake_metrics]
     logs:
-      exporters: [debug, otlphttp/snowflake_logs]
+      exporters: [otlp_http/snowflake_logs]
 
 ```
 
-You can now bring the application up again with:
+You can now bring the application up with the following, which merges both compose files:
 
 ```shell
-docker compose up -d
+docker compose -f compose.yaml -f compose.extras.yaml up -d
 ```
 
 Give the demo application a few moments to start up, then generate some traffic by clicking around the [Web store](http://localhost:8080/) — browse products, add items to your cart, and check out. This traffic generates logs, metrics, and traces that flow through the Collector to Snowflake.
@@ -305,14 +301,13 @@ To confirm telemetry is being exported successfully, check the Collector's logs 
 docker compose logs otel-collector
 ```
 
-
 ### Optional: Full Mode
 
 If you have ~6GB or more of free RAM, you can also run the application in "full" mode. This adds Kafka, additional services that depend on Kafka, and patches other core services for Kafka-awareness. This is not required, but does <!-- TODO -->
 
 ```shell
 docker compose down --remove-orphans
-docker compose -f compose.yaml -f compose.full.yaml up -d
+docker compose -f compose.yaml -f compose.full.yaml -f compose.extras.yaml up -d
 ```
 
 <!-- ------------------------ -->
@@ -321,8 +316,8 @@ docker compose -f compose.yaml -f compose.full.yaml up -d
 With telemetry flowing into your Event Tables, you can query logs, metrics, and traces directly with SQL. Run the following in a Snowsight worksheet:
 
 ```sql
-USE DATABASE OTLP_INGEST_QS;   -- or the value you set for QS_DB
-USE SCHEMA TELEMETRY;          -- or the value you set for QS_SCHEMA
+USE DATABASE OTLP_INGEST_QS;
+USE SCHEMA TELEMETRY;
 
 -- Most recent trace spans, by service
 SELECT
@@ -368,23 +363,21 @@ When you're done, stop the OpenTelemetry Demo and remove its containers, network
 docker compose down --remove-orphans -v
 ```
 
-Next, clean up the Snowflake resources created earlier. Return to your Snowsight worksheet, **re-run the *Variable Definitions* block from earlier** (so the session variables are set again for this session), then run the following to remove all resources:
+Next, clean up the Snowflake resources created earlier by running the following in a Snowsight worksheet:
 
 ```sql
 -- ---- 1) Drop the service user (also removes its PAT) -------------------------
 USE ROLE USERADMIN;
-DROP USER IF EXISTS IDENTIFIER($QS_INGEST_USER);
+DROP USER IF EXISTS QS_TELEMETRY_INGEST_USER;
 
 -- ---- 2) Drop Network Policy and Role ------------------------------------------
 USE ROLE SECURITYADMIN;
-SET qs_drop_np_ddl = 'DROP NETWORK POLICY IF EXISTS ' || $QS_INGEST_NP;
-EXECUTE IMMEDIATE $qs_drop_np_ddl;
-
-DROP ROLE IF EXISTS IDENTIFIER($QS_INGEST_RL);
+DROP NETWORK POLICY IF EXISTS QS_TELEMETRY_INGEST_NP;
+DROP ROLE IF EXISTS QS_TELEMETRY_INGEST_RL;
 
 -- ---- 3) Drop Database (cascades to the schema and event tables) --------------
 USE ROLE SYSADMIN;
-DROP DATABASE IF EXISTS IDENTIFIER($QS_DB);
+DROP DATABASE IF EXISTS OTLP_INGEST_QS;
 ```
 
 <!-- ------------------------ -->
