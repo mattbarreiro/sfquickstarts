@@ -1,5 +1,9 @@
 <!-- TODO
-* - 
+* - Modify the Snowflake queries to not be the same thing 3x times - make it something more creative!
+* - Add a few screenshots
+* 
+* - test if snowflake endpoint can receive protobuf encoding=proto (after all, it is the default!!!)
+* 
 * - Final checks before submission
 *   - Ensure you're complying with the following:
 *     - Folder name, md file name, id, and end of "fork repo link" all match exactly
@@ -271,7 +275,7 @@ exporters:
       Authorization: "Bearer ${env:SNOWFLAKE_PAT}"
   otlp_http/snowflake_logs:
     endpoint: ${env:SNOWFLAKE_OTLP_ENDPOINT}
-    encoding: json    # Snowflake expects OTLP JSON format
+    encoding: json
     headers:
       event-table: ${env:SNOWFLAKE_EVENT_TABLE_LOGS}
       Authorization: "Bearer ${env:SNOWFLAKE_PAT}"
@@ -319,7 +323,7 @@ With telemetry flowing into your Event Tables, you can query logs, metrics, and 
 USE DATABASE OTLP_INGEST_QS;
 USE SCHEMA TELEMETRY;
 
--- Most recent trace spans, by service
+-- Most recent trace spans
 SELECT
   TIMESTAMP,
   RESOURCE_ATTRIBUTES:"service.name"::STRING AS SERVICE_NAME,
@@ -329,7 +333,7 @@ FROM TRACES
 ORDER BY TIMESTAMP DESC
 LIMIT 25;
 
--- Most recent log messages, by service
+-- Most recent log messages
 SELECT
   TIMESTAMP,
   RESOURCE_ATTRIBUTES:"service.name"::STRING AS SERVICE_NAME,
@@ -339,7 +343,7 @@ FROM LOGS
 ORDER BY TIMESTAMP DESC
 LIMIT 25;
 
--- Most recent metric data points, by service
+-- Most recent metric data points
 SELECT
   TIMESTAMP,
   RESOURCE_ATTRIBUTES:"service.name"::STRING AS SERVICE_NAME,
